@@ -12,8 +12,10 @@ ADD ["container-files","/"]
 # Install packages
 RUN yum -y update && yum -y install \
 	xdotool \
+	ImageMagick \
 	php-cli \
 	php-fpm \
+	php-gd \
 	&& yum clean all
 
 # Start php-fpm

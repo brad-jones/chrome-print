@@ -261,7 +261,10 @@ class RoboFile extends Brads\Robo\Tasks
 	}
 	
 	/**
-	 * Shortcut to removes all our images.
+	 * Shortcut to removes all our images. Dev use only!
+	 *
+	 * This is pretty extreme, we would only use this if we needed
+	 * to bust some docker cache.
 	 */
 	public function removeImages()
 	{
@@ -316,19 +319,30 @@ class RoboFile extends Brads\Robo\Tasks
 		// Next remove those containers
 		$this->remove(['destroy-data' => true]);
 		
-		// Do a full rebuild
-		if ($opts['destroy-images'])
-		{
-			$this->removeImages();
-		}
+		// Do a full rebuild, remove the actual images as well
+		if ($opts['destroy-images']) $this->removeImages();
 		
 		// Now build some new images
 		$this->build();
 		
-		// Then create some new containers
-		$this->create();
+		// While developing we want the main www root bind mounted to the host.
+		// So that as we make changes to the php it is reflected striaght away
+		// like you would be used to in a normal non docker environment.
+		$this->taskExec('docker')
+			->arg('run')
+			->arg('-d')
+			->arg('-v '.getenv('CONDUCTOR_ROOT').'/storage/container-files/var/www/html:/var/www/html')
+			->option('name', 'chrome-print-storage')
+			->arg('bradjones/chrome-print-storage')
+			->arg('/bin/sh')
+		->run();
 		
-		// And start the containers again
+		// Create the remaining containers
+		$this->createXvfb();
+		$this->createPhpFpm();
+		$this->createNginx();
+		
+		// And start the containers
 		$this->start();
 	}
 }

@@ -8,7 +8,7 @@ function shutdown {
 }
 
 xvfb-run --server-args="$DISPLAY -screen 0 $GEOMETRY -ac +extension RANDR" \
-	/usr/bin/google-chrome --no-first-run --no-default-browser-check --no-sandbox --start-maximized &
+	/usr/bin/google-chrome --no-first-run --no-default-browser-check --no-sandbox --start-maximized --user-data-dir /root/google-chrome-profile &
 NODE_PID=$!
 
 trap shutdown SIGTERM SIGINT
