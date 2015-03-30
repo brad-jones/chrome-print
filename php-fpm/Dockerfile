@@ -1,24 +1,20 @@
 # Chrome Print - php-fpm
 # ==============================================================================
-# This container runs php-fpm and xdotool to communicate to the xvfb container
-# runnig Google Chrome. The main PHP code that provides the REST API to easily
-# convert HTML document into PDF documents is part of this container.
+# This container runs php-fpm and communicates with nginx via a unix socket.
+# Basically this is the container that houses the main php rest api.
 
 FROM fedora:latest
 MAINTAINER Brad Jones <brad@bjc.id.au>
 
-# Update base image
-RUN yum update -y && yum clean all
+# Add our container files
+ADD ["container-files","/"]
 
 # Install packages
-RUN yum install -y \
-	php \
-	php-fpm \
+RUN yum -y update && yum -y install \
 	xdotool \
+	php-cli \
+	php-fpm \
 	&& yum clean all
 
-# Add PHP-FPM config
-ADD ["php-fpm-config", "/etc"]
-
-# Start php fpm
+# Start php-fpm
 CMD ["/usr/sbin/php-fpm"]

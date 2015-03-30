@@ -1,28 +1,22 @@
-# Chrome Print - shared data container
+# Chrome Print - storage
 # ==============================================================================
-# This is a container that simply sets up a volume
-# to be shared between all our other containers.
-#
-# Build the container: docker build -t chrome-print/storage:TAG .
-#
-# Create the container: docker create --name chrome-print-storage chrome-print/storage:TAG
-#
-# Then share the storage to all other Chrome Print containers:
-# docker run -d --volumes-from chrome-print-storage --name chrome-print-xvfb chrome-print/xvfb:TAG
-# docker run -d --volumes-from chrome-print-storage --name chrome-print-php-fpm chrome-print/php-fpm:TAG
-# docker run -d --volumes-from chrome-print-storage --name chrome-print-nginx chrome-print/nginx:TAG
+# This container provides some shared storage space for our other containers.
+# Out of the box all communication is done via unix sockets not tcp.
+# For smaller single host setups this should work fine. For larger deployments
+# you may like to reconfigure the services to talk via TCP.
 
 FROM fedora:latest
 MAINTAINER Brad Jones <brad@bjc.id.au>
 
-# Create the dir
-RUN mkdir /chrome-print-data
+# The main php rest api lives in /var/www/html
+# All logs from all containers should end up in /var/log,
+# you may like to setup something like: : http://logstash.net/
+# Our shared sockets will reside in /var/run
+VOLUME ["/var/www/html", "/var/log", "/var/run", "/tmp/.X11-unix"]
 
-# Add some intial data, this contains our main PHP code.
-ADD ["intial", "/chrome-print-data"]
+# Add an intial data to the shared volumnes above.
+ADD ["container-files","/"]
 
-# Define the volume
-VOLUME ["/chrome-print-data"]
-
-# Run a command that indicates (trivial) success and exits
+# Even though we never actually run this container,
+# docker build/create still likes to see a valid executable.
 CMD ["/bin/true"]

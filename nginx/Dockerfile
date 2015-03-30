@@ -1,25 +1,20 @@
-# Chrome Print - php-fpm
+# Chrome Print - nginx
 # ==============================================================================
-# This container runs php-fpm and xdotool to communicate to the xvfb container
-# runnig Google Chrome. The main PHP code that provides the REST API to easily
-# convert HTML document into PDF documents is part of this container.
+# This container runs nginx and is the frontend for our rest api.
 
 FROM fedora:latest
 MAINTAINER Brad Jones <brad@bjc.id.au>
 
-# Update base image
-RUN yum update -y && yum clean all
+# Add our container files
+ADD ["container-files","/"]
 
 # Install packages
-RUN yum install -y \
+RUN yum -y update && yum -y install \
 	nginx \
 	&& yum clean all
 
-# Add Nginx config
-ADD ["nginx-config", "/etc/nginx"]
-
-# Expose HTTP
-EXPOSE 80
+# Publish standard http and httpd ports
+EXPOSE [80, 443]
 
 # Start nginx
 CMD ["/usr/sbin/nginx"]
