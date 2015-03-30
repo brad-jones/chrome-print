@@ -4,7 +4,7 @@ use Gears\String as Str;
 
 class RoboFile extends Brads\Robo\Tasks
 {
-	public function convert($html)
+	public function convert()
 	{
 		// Grab a list of all the docker containers on the host
 		$containers = Str::s
@@ -54,27 +54,44 @@ class RoboFile extends Brads\Robo\Tasks
 			// container you can run ./conductor stop:xvfb
 			// And if you then want to remove it also: ./conductor remove:xvfb
 		}
-
+		
 		// Now lets run a temporary version of the php-fpm container.
 		// This container has xdotool and all other needed libs.
 		// It seemed a waste to create yet another container just for this.
-		$this->taskDockerRun('chrome-print-php-fpm')
+		$result = $this->taskDockerRun('bradjones/chrome-print-php-fpm')
 			->interactive()
 			->option('rm')
 			->exec('/usr/local/bin/chrome-print')
-			->option('', '')
-		->run();
+			->printed(false)
+			->run()
+		->getMessage();
+		
+		var_dump($result);
 	}
-
+	
 	/**
-	 * Pull down all our images from docker hub.
+	 * Build all images.
+	 *
+	 * This should only be used if developing the images.
+	 * For production use the pulled images from docker hub.
+	 */
+	public function build()
+	{
+		$this->taskDockerBuild('storage')->tag('bradjones/chrome-print-storage')->run();
+		$this->taskDockerBuild('xvfb')->tag('bradjones/chrome-print-xvfb')->run();
+		$this->taskDockerBuild('php-fpm')->tag('bradjones/chrome-print-php-fpm')->run();
+		$this->taskDockerBuild('nginx')->tag('bradjones/chrome-print-nginx')->run();
+	}
+	
+	/**
+	 * Pull down all our images from docker hub. Use this to update your images.
 	 */
 	public function pull()
 	{
-		$this->taskDockerPull('bradjones/chrome-print-storage')->run();
-		$this->taskDockerPull('bradjones/chrome-print-xvfb')->run();
-		$this->taskDockerPull('bradjones/chrome-print-php-fpm')->run();
-		$this->taskDockerPull('bradjones/chrome-print-nginx')->run();
+		$this->taskExec('docker pull bradjones/chrome-print-storage')->run();
+		$this->taskExec('docker pull bradjones/chrome-print-xvfb')->run();
+		$this->taskExec('docker pull bradjones/chrome-print-php-fpm')->run();
+		$this->taskExec('docker pull bradjones/chrome-print-nginx')->run();
 	}
 	
 	/**
@@ -216,5 +233,36 @@ class RoboFile extends Brads\Robo\Tasks
 	public function removeNginx()
 	{
 		$this->taskExec('docker rm chrome-print-nginx')->run();
+	}
+	
+	/**
+	 * Shortcut to removes all our images.
+	 */
+	public function removeImages()
+	{
+		$this->removeImagesStorage();
+		$this->removeImagesXvfb();
+		$this->removeImagesPhpFpm();
+		$this->removeImagesNginx();
+	}
+
+	public function removeImagesStorage()
+	{
+		$this->taskExec('docker rmi -f bradjones/chrome-print-storage')->run();
+	}
+
+	public function removeImagesXvfb()
+	{
+		$this->taskExec('docker rmi -f bradjones/chrome-print-xvfb')->run();
+	}
+
+	public function removeImagesPhpFpm()
+	{
+		$this->taskExec('docker rmi -f bradjones/chrome-print-php-fpm')->run();
+	}
+
+	public function removeImagesNginx()
+	{
+		$this->taskExec('docker rmi -f bradjones/chrome-print-nginx')->run();
 	}
 }
