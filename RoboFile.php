@@ -2,6 +2,11 @@
 
 class RoboFile extends Brads\Robo\Tasks
 {
+	public function convert($html)
+	{
+
+	}
+
 	/**
 	 * Pull down all our images from docker hub.
 	 */
@@ -18,8 +23,7 @@ class RoboFile extends Brads\Robo\Tasks
 	 */
 	public function run()
 	{
-		// Robo does not yet have a built in task for `docker create`
-		// Brads Robo Tasks might fix that :)
+		// Create but do not run the storage container
 		$this->taskExec('docker')
 			->arg('create')
 			->option('name', 'chrome-print-storage')
