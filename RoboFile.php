@@ -4,8 +4,42 @@ use Gears\String as Str;
 
 class RoboFile extends Brads\Robo\Tasks
 {
-	public function convert()
+	private $http_port = '8081';
+	private $https_port = '8082';
+	
+	/**
+	 * Converts a HTML document into a PDF document using Google Chrome.
+	 *
+	 * @param string $html This takes a few diffrent options.
+	 *
+	 *                     If set to "stdin", we will read from stdin.
+	 *
+	 *                     Or it can be a valid filepath, keeping in mind this
+	 *                     RoboFile is being run inside a container and only has
+	 *                     access to files and folders below the current
+	 *                     location.
+	 *
+	 *                     Or you can provide a fully qualified URL.
+	 */
+	public function convert($html, $pdf = 'stdout')
 	{
+		// Read in our html document
+		if (strtolower($html) == 'stdin')
+		{
+			$html = ''; while(!feof(STDIN)) { $html .= fgets(STDIN, 4096); }
+		}
+		elseif (file_exists($html) || Str::contains($html, '://'))
+		{
+			$html = file_get_contents($html);
+		}
+		else
+		{
+			throw new RuntimeException
+			(
+				'You must provide a HTML document to convert to PDF!'
+			);
+		}
+		
 		// Grab a list of all the docker containers on the host
 		$containers = Str::s
 		(
@@ -58,29 +92,19 @@ class RoboFile extends Brads\Robo\Tasks
 		// Now lets run a temporary version of the php-fpm container.
 		// This container has xdotool and all other needed libs.
 		// It seemed a waste to create yet another container just for this.
+		
+		/*
 		$result = $this->taskDockerRun('bradjones/chrome-print-php-fpm')
 			->interactive()
 			->option('rm')
-			->exec('/usr/local/bin/chrome-print')
+			->volume('/path/to/data', '/mnt/src-document')
+			->exec('/var/www/html/bin/chrome-print')
 			->printed(false)
 			->run()
 		->getMessage();
 		
 		var_dump($result);
-	}
-	
-	/**
-	 * Build all images.
-	 *
-	 * This should only be used if developing the images.
-	 * For production use the pulled images from docker hub.
-	 */
-	public function build()
-	{
-		$this->taskDockerBuild('storage')->tag('bradjones/chrome-print-storage')->run();
-		$this->taskDockerBuild('xvfb')->tag('bradjones/chrome-print-xvfb')->run();
-		$this->taskDockerBuild('php-fpm')->tag('bradjones/chrome-print-php-fpm')->run();
-		$this->taskDockerBuild('nginx')->tag('bradjones/chrome-print-nginx')->run();
+		*/
 	}
 	
 	/**
@@ -143,7 +167,8 @@ class RoboFile extends Brads\Robo\Tasks
 			->option('name', 'chrome-print-nginx')
 			->option('volumes-from', 'chrome-print-storage')
 			->option('restart', 'on-failure:10')
-			->option('-p', '8081:80')
+			->option('-p', $this->http_port.':80')
+			->option('-p', $this->https_port.':443')
 			->arg('bradjones/chrome-print-nginx')
 		->run();
 	}
@@ -264,5 +289,46 @@ class RoboFile extends Brads\Robo\Tasks
 	public function removeImagesNginx()
 	{
 		$this->taskExec('docker rmi -f bradjones/chrome-print-nginx')->run();
+	}
+	
+	/**
+	 * Build all the images. Dev use only!
+	 *
+	 * This should only be used if developing the images.
+	 * For production use the pulled images from docker hub.
+	 */
+	public function build()
+	{
+		$this->taskDockerBuild('storage')->tag('bradjones/chrome-print-storage')->run();
+		$this->taskDockerBuild('xvfb')->tag('bradjones/chrome-print-xvfb')->run();
+		$this->taskDockerBuild('php-fpm')->tag('bradjones/chrome-print-php-fpm')->run();
+		$this->taskDockerBuild('nginx')->tag('bradjones/chrome-print-nginx')->run();
+	}
+	
+	/**
+	 * Stops, removes, builds, creates & starts. Dev use only!
+	 */
+	public function reload($opts = ['destroy-images' => false])
+	{
+		// First make sure any previous containers are stopped
+		$this->stop();
+		
+		// Next remove those containers
+		$this->remove(['destroy-data' => true]);
+		
+		// Do a full rebuild
+		if ($opts['destroy-images'])
+		{
+			$this->removeImages();
+		}
+		
+		// Now build some new images
+		$this->build();
+		
+		// Then create some new containers
+		$this->create();
+		
+		// And start the containers again
+		$this->start();
 	}
 }
