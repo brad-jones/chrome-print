@@ -1,10 +1,69 @@
 <?php
 
+use Gears\String as Str;
+
 class RoboFile extends Brads\Robo\Tasks
 {
 	public function convert($html)
 	{
+		// Grab a list of all the docker containers on the host
+		$containers = Str::s
+		(
+			$this->taskExec('docker')
+				->arg('ps')
+				->arg('-a')
+				->printed(false)
+				->run()
+				->getMessage()
+		);
 
+		// Does it have a storage container
+		if (!$containers->contains('chrome-print-storage'))
+		{
+			// Nope so lets create it
+			$this->createStorage();
+		}
+
+		// Does it have a xvfb container
+		if (!$containers->contains('chrome-print-xvfb'))
+		{
+			// Nope so lets create it
+			$this->createXvfb();
+		}
+
+		// Grab a list of all the "running" containers on the host
+		$runningContainers = Str::s
+		(
+			$this->taskExec('docker')
+				->arg('ps')
+				->printed(false)
+				->run()
+				->getMessage()
+		);
+
+		// Is the xvfb container already running?
+		if (!$runningContainers->contains('chrome-print-xvfb'))
+		{
+			// Nope so lets start it
+			$this->startXvfb();
+
+			// NOTE: We never shut it down because it can be reused,
+			// it can take a few seconds for the virtual frame buffer and
+			// Google Chrome to startup. Thus subsequent calls to this command
+			// should be faster. If you do want to explicity shutdown the xvfb
+			// container you can run ./conductor stop:xvfb
+			// And if you then want to remove it also: ./conductor remove:xvfb
+		}
+
+		// Now lets run a temporary version of the php-fpm container.
+		// This container has xdotool and all other needed libs.
+		// It seemed a waste to create yet another container just for this.
+		$this->taskDockerRun('chrome-print-php-fpm')
+			->interactive()
+			->option('rm')
+			->exec('/usr/local/bin/chrome-print')
+			->option('', '')
+		->run();
 	}
 
 	/**
@@ -19,67 +78,111 @@ class RoboFile extends Brads\Robo\Tasks
 	}
 	
 	/**
-	 * Now lets run our containers and link them together in the correct order.
+	 * Shortcut to create all containers.
 	 */
-	public function run()
+	public function create()
 	{
-		// Create but do not run the storage container
+		$this->createStorage();
+		$this->createXvfb();
+		$this->createPhpFpm();
+		$this->createNginx();
+	}
+
+	public function createStorage()
+	{
 		$this->taskExec('docker')
 			->arg('create')
 			->option('name', 'chrome-print-storage')
 			->arg('bradjones/chrome-print-storage')
 		->run();
-		
-		// Start the x virtual frame buffer and google chrome
-		$this->taskDockerRun('bradjones/chrome-print-xvfb')
-			->name('chrome-print-xvfb')
+	}
+
+	public function createXvfb()
+	{
+		$this->taskExec('docker')
+			->arg('create')
+			->option('name', 'chrome-print-xvfb')
 			->option('volumes-from', 'chrome-print-storage')
 			->option('restart', 'on-failure:10')
-			->detached()
+			->arg('bradjones/chrome-print-xvfb')
 		->run();
-		
-		// Start php-fpm
-		$this->taskDockerRun('bradjones/chrome-print-php-fpm')
-			->name('chrome-print-php-fpm')
+	}
+
+	public function createPhpFpm()
+	{
+		$this->taskExec('docker')
+			->arg('create')
+			->option('name', 'chrome-print-php-fpm')
 			->option('volumes-from', 'chrome-print-storage')
 			->option('restart', 'on-failure:10')
-			->detached()
+			->arg('bradjones/chrome-print-php-fpm')
 		->run();
-		
-		// Start nginx
-		$this->taskDockerRun('bradjones/chrome-print-nginx')
-			->name('chrome-print-nginx')
+	}
+
+	public function createNginx()
+	{
+		$this->taskExec('docker')
+			->arg('create')
+			->option('name', 'chrome-print-nginx')
 			->option('volumes-from', 'chrome-print-storage')
 			->option('restart', 'on-failure:10')
-			->publish(8081, 80)
-			->detached()
+			->option('-p', '8081:80')
+			->arg('bradjones/chrome-print-nginx')
 		->run();
-		
-		$this->say('Go to http://localhost:8081/');
 	}
 	
 	/**
-	 * Starts our containers using the config defined in the run command.
+	 * Shortcut to start all our containers.
 	 */
 	public function start()
 	{
+		$this->startXvfb();
+		$this->startPhpFpm();
+		$this->startNginx();
+	}
+
+	public function startXvfb()
+	{
 		$this->taskDockerStart('chrome-print-xvfb')->run();
+	}
+
+	public function startPhpFpm()
+	{
 		$this->taskDockerStart('chrome-print-php-fpm')->run();
+	}
+
+	public function startNginx()
+	{
 		$this->taskDockerStart('chrome-print-nginx')->run();
 	}
 	
 	/**
-	 * Stops all our containers.
+	 * Shortcut to stop all our containers.
 	 */
 	public function stop()
 	{
+		$this->stopXvfb();
+		$this->stopPhpFpm();
+		$this->stopNginx();
+	}
+
+	public function stopXvfb()
+	{
 		$this->taskDockerStop('chrome-print-xvfb')->run();
+	}
+
+	public function stopPhpFpm()
+	{
 		$this->taskDockerStop('chrome-print-php-fpm')->run();
+	}
+
+	public function stopNginx()
+	{
 		$this->taskDockerStop('chrome-print-nginx')->run();
 	}
 	
 	/**
-	 * Removes all our containers.
+	 * Shortcut to removes all our containers.
 	 */
 	public function remove($opts = ['destroy-data' => false])
 	{
@@ -87,11 +190,31 @@ class RoboFile extends Brads\Robo\Tasks
 		
 		if ($opts['destroy-data'])
 		{
-			$this->taskExec('docker rm chrome-print-storage')->run();
+			$this->removeStorage();
 		}
 		
+		$this->removeXvfb();
+		$this->removePhpFpm();
+		$this->removeNginx();
+	}
+
+	public function removeStorage()
+	{
+		$this->taskExec('docker rm chrome-print-storage')->run();
+	}
+
+	public function removeXvfb()
+	{
 		$this->taskExec('docker rm chrome-print-xvfb')->run();
+	}
+
+	public function removePhpFpm()
+	{
 		$this->taskExec('docker rm chrome-print-php-fpm')->run();
+	}
+
+	public function removeNginx()
+	{
 		$this->taskExec('docker rm chrome-print-nginx')->run();
 	}
 }
