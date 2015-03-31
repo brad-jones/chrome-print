@@ -1,0 +1,24 @@
+{
+	"name": "gears/string",
+	"description": "A collection of basic string manipulation functions.",
+	"homepage": "https://github.com/phpgearbox/string",
+	"keywords": ["string", "manipulation"],
+	"license": "MIT",
+	"autoload":
+	{
+		"psr-4": { "Gears\\": "src" },
+		"files": ["src/Functions.php"]
+	},
+	"require":
+	{
+		"illuminate/support": "5.*",
+		"patchwork/utf8": "1.*",
+		"neitanod/forceutf8": "1.*"
+	},
+	"require-dev":
+	{
+		"phpunit/phpunit": "4.*",
+		"codegyre/robo": "*",
+		"guzzlehttp/guzzle": "4.*"
+	}
+}

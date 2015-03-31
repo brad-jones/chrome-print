@@ -5,23 +5,26 @@
 FROM fedora:latest
 MAINTAINER Brad Jones <brad@bjc.id.au>
 
-# Add our container files
-ADD ["container-files","/"]
+# Update base image
+RUN yum -y update && yum clean all
+
+# Install the google chrome repo before running yum install
+ADD ["container-files/etc/yum.repos.d","/etc/yum.repos.d"]
 
 # Install packages
-RUN yum update -y && yum install -y \
+RUN yum install -y \
 	google-chrome-stable \
 	xorg-x11-server-Xvfb \
 	&& yum clean all
 
-# Config for the xvfb-run wrapper
-ENV SCREEN_WIDTH 1360
-ENV SCREEN_HEIGHT 1020
-ENV SCREEN_DEPTH 24
-ENV DISPLAY :99.0
-
-# Make sure our xvfb-run wrapper is executable
+# Install our xvfb-run wrapper
+ADD ["container-files/usr/local/bin","/usr/local/bin"]
 RUN chmod +x /usr/local/bin/xvfb-run-wrapper.sh
+
+RUN useradd -ms /bin/bash chrome
+RUN chown -R chrome:chrome /home/chrome
+USER chrome
+ENV HOME /home/chrome
 
 # Start the virtual frame buffer with google chrome running inside
 CMD ["/usr/local/bin/xvfb-run-wrapper.sh"]

@@ -144,6 +144,7 @@ class RoboFile extends Brads\Robo\Tasks
 			->arg('create')
 			->option('name', 'chrome-print-xvfb')
 			->option('volumes-from', 'chrome-print-storage')
+			->option('add-host', 'docker:'.getenv('CONDUCTOR_HOST'))
 			->option('restart', 'on-failure:10')
 			->arg('bradjones/chrome-print-xvfb')
 		->run();
@@ -155,6 +156,7 @@ class RoboFile extends Brads\Robo\Tasks
 			->arg('create')
 			->option('name', 'chrome-print-php-fpm')
 			->option('volumes-from', 'chrome-print-storage')
+			->option('add-host', 'docker:'.getenv('CONDUCTOR_HOST'))
 			->option('restart', 'on-failure:10')
 			->arg('bradjones/chrome-print-php-fpm')
 		->run();
@@ -166,6 +168,7 @@ class RoboFile extends Brads\Robo\Tasks
 			->arg('create')
 			->option('name', 'chrome-print-nginx')
 			->option('volumes-from', 'chrome-print-storage')
+			->option('add-host', 'docker:'.getenv('CONDUCTOR_HOST'))
 			->option('restart', 'on-failure:10')
 			->option('-p', $this->http_port.':80')
 			->option('-p', $this->https_port.':443')
@@ -221,6 +224,15 @@ class RoboFile extends Brads\Robo\Tasks
 	public function stopNginx()
 	{
 		$this->taskDockerStop('chrome-print-nginx')->run();
+	}
+	
+	/**
+	 * Run start and then stop.
+	 */
+	public function restart()
+	{
+		$this->stop();
+		$this->start();
 	}
 	
 	/**
@@ -329,12 +341,10 @@ class RoboFile extends Brads\Robo\Tasks
 		// So that as we make changes to the php it is reflected striaght away
 		// like you would be used to in a normal non docker environment.
 		$this->taskExec('docker')
-			->arg('run')
-			->arg('-d')
+			->arg('create')
 			->arg('-v '.getenv('CONDUCTOR_ROOT').'/storage/container-files/var/www/html:/var/www/html')
 			->option('name', 'chrome-print-storage')
 			->arg('bradjones/chrome-print-storage')
-			->arg('/bin/sh')
 		->run();
 		
 		// Create the remaining containers

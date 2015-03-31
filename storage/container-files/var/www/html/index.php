@@ -1,91 +1,105 @@
 <?php
 
+// Load up composer
 require('vendor/autoload.php');
 
+// Import some classes
+use Silex\Application;
+use ChromePrint\XdoTool;
+use Gears\String as Str;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+
+// Initialise Silex
+$app = new Application();
+$app['debug'] = true;
+
+// Add our XdoTool helper class into the Silex app.
+$app['xdo'] = $app->share(function () { return new XdoTool(); });
+
 /**
- * Intial API Structure and Ideas
+ * Displays a nice graphical home page.
  *
- * GET /print?url=http://example.org/document.html
- *
- * POST /print
- * html = html string
- *
- * Need to think about how google chrome
- * gets access to other assets in the html.
+ * This allows the user to monitor what google chrome is actually doing by
+ * watching the screenshots as they refresh. It also allows the user to
+ * test the service by submiting a HTML document to be converted to PDF.
  */
-
-$app = new \Slim\Slim();
-
-$app->get('/', function () use ($app)
+$app->get('/', function (Application $app)
 {
-	echo '<h1>Google Chrome Print is running yay!</h1><img src="/screenshot">';
+	return
+	'
+		<!DOCTYPE html>
+		<html>
+			<head>
+				<link rel="stylesheet" href="http://yui.yahooapis.com/pure/0.6.0/pure-min.css">
+				<script src="http://code.jquery.com/jquery-2.1.3.min.js"></script>
+				<script>
+					$(window).on("load", function()
+					{
+						setInterval(function()
+						{
+							$(".screenshot").attr("src", "/screenshot?timestamp="+new Date().getTime());
+						}, 500);
+					});
+				</script>
+			</head>
+			<body style="text-align:center;">
+				<h1>Google Chrome Print is running yay!</h1>
+				<img class="screenshot" src="/screenshot" style="height:800px">
+			</body>
+		</html>
+	';
 });
 
-$app->get('/screenshot', function () use ($app)
+/**
+ * Takes a screenshot of the X virtual frame buffer.
+ *
+ * @return PNG Response
+ */
+$app->get('/screenshot', function (Application $app)
 {
-	exec('DISPLAY=:99 xdotool search --sync "Google Chrome" windowmove --sync 0 0');
-	exec('DISPLAY=:99 xdotool search --sync "Google Chrome" windowsize --sync 100% 100%');
-	exec('DISPLAY=:99 import -window root -quality 100 /tmp/screenshot.png');
-	$im = imagecreatefrompng('/tmp/screenshot.png');
-	header('Content-Type: image/png');
-	imagepng($im);
-	imagedestroy($im);
-	exit;
+	$image = $app['xdo']->takeScreenShot();
+	
+	return new Response($image, 200, ['Content-Type' => 'image/png']);
 });
 
+/**
+ * Prints your supplied HTML document to PDF
+ *
+ * @param string url Keeping in mind that Google Chrome is running inside a
+ *                   docker container, if Google Chrome can get to your URL,
+ *                   we can print it for you.
+ *
+ * Further notes about the connectivity of docker containers.
+ * To access the docker host use a url like: http://docker/ but make sure your
+ * host firewall allows the docker bridge to talk to your host.
+ *
+ * If you want to access another docker container make sure it's ports are
+ * exposed and it has been linked correctly  and you should be able to use the
+ * link alias as the hostname.
+ *
+ * @return PDF Response
+ */
+$app->get('/print/{url}', function (Application $app, $url)
+{
+	return new Response
+	(
+		$app['xdo']->printWithUrl($url), 200,
+		['Content-Type' => 'application/pdf']
+	);
+});
+
+$app->get('/print/{url}/{size}/{layout}/{wait}', function (Application $app, $url, $size, $layout, $wait)
+{
+	return new Response
+	(
+		$app['xdo']->printWithUrl($url, $size, $layout, $wait), 200,
+		['Content-Type' => 'application/pdf']
+	);
+})
+->assert('size', 'a4|a3|letter|legal|tabloid')
+->assert('layout', 'portrait|landscape')
+->assert('wait', '\d+');
+
+// Run the app
 $app->run();
-
-/*
-#!/bin/sh
-
-# Run chrome like so in its own terminal / process / fork:
-# xvfb-run --server-args='-screen 0, 1024x768x16' google-chrome file:///tmp/to-be-printed.html
-
-# Maximise the chrome window, helps with mouse cords.
-DISPLAY=:99 xdotool search --sync "Google Chrome" windowmove --sync 0 0
-DISPLAY=:99 xdotool search --sync "Google Chrome" windowsize --sync 100% 100%
-
-# Open Print Preview
-DISPLAY=:99 xdotool search --sync "Google Chrome" key --clearmodifiers ctrl+p
-
-# TODO: Set print settings. Ensure printer is set PDF.
-# For now just rely on the defaults being remembered correctly.
-
-# Move mouse to save button
-DISPLAY=:99 xdotool mousemove --sync 300 150
-
-# Wait for Chrome to open Print Preview
-sleep 1
-
-# Click save button
-DISPLAY=:99 xdotool click 1
-
-# Wait for the save file dialog
-DISPLAY=:99 xdotool search --sync "Save File"
-
-# Move mouse to filename box
-DISPLAY=:99 xdotool mousemove --sync 1000 150
-
-# Click into the filename box
-DISPLAY=:99 xdotool click 1
-
-# Select all text
-DISPLAY=:99 xdotool key --clearmodifiers ctrl+a
-
-# Delete all text
-DISPLAY=:99 xdotool key --clearmodifiers Delete
-
-# Now type our filename, including path
-DISPLAY=:99 xdotool type "/tmp/printed.pdf"
-
-# Move the mouse to the save button
-DISPLAY=:99 xdotool mousemove --sync 797 722
-
-# Click the save button
-DISPLAY=:99 xdotool click 1
-
-#sleep 1
-
-# For debugging purposes we can use ImageMagick to take screen shots so we can actually see what is happening
-#DISPLAY=:99 import -window root -quality 100 /tmp/screenshot.png
-*/

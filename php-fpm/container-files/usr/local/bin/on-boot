@@ -1,0 +1,7 @@
+#!/usr/bin/php
+<?php
+
+if (file_exists('/tmp/google-chrome-setup'))
+{
+	unlink('/tmp/google-chrome-setup');
+}

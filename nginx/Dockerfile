@@ -5,16 +5,22 @@
 FROM fedora:latest
 MAINTAINER Brad Jones <brad@bjc.id.au>
 
-# Add our container files
-ADD ["container-files","/"]
+# Update base image
+RUN yum -y update && yum clean all
 
 # Install packages
-RUN yum -y update && yum -y install \
+RUN yum -y install \
 	nginx \
 	&& yum clean all
 
+# Add our container files
+ADD ["container-files","/"]
+
 # Publish standard http and httpd ports
 EXPOSE 80 443
+
+RUN useradd -ms /bin/bash chrome
+RUN chown -R chrome:chrome /home/chrome
 
 # Start nginx
 CMD ["/usr/sbin/nginx"]

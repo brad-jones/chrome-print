@@ -1,5 +1,15 @@
 {
-	"require": {
-		"slim/slim": "~2.6"
+	"require":
+	{
+		"silex/silex": "~1.2",
+		"symfony/process": "2.*",
+		"gears/string": "*"
+	},
+	"autoload":
+	{
+		"psr-4":
+		{
+			"ChromePrint\\": "chrome-print/"
+		}
 	}
 }
