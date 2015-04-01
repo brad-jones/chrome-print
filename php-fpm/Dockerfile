@@ -11,6 +11,7 @@ RUN yum -y update && yum clean all
 
 # Install packages
 RUN yum -y install \
+	lsof \
 	xdotool \
 	ImageMagick \
 	php-cli \
@@ -21,11 +22,10 @@ RUN yum -y install \
 # Add our container files
 ADD ["container-files","/"]
 
-# Make our on-boot hook executable
-RUN chmod +x /usr/local/bin/on-boot
-
+# Add our chrome user, nginx and php-fpm also run as the chorme user.
+# This is so that documents printed by google chrome can be read by php.
 RUN useradd -ms /bin/bash chrome
 RUN chown -R chrome:chrome /home/chrome
 
 # Start php-fpm
-CMD /usr/local/bin/on-boot && /usr/sbin/php-fpm
+CMD chmod 0777 /var/run/docker.sock && /usr/sbin/php-fpm

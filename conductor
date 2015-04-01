@@ -20,5 +20,7 @@ docker run -it --rm \
 -v $dir:/mnt/src \
 --env CONDUCTOR_ROOT=$dir \
 --env CONDUCTOR_HOST=$docker_host \
+--env CONDUCTOR_DOCKER_BIN=$docker \
+--env CONDUCTOR_DOCKER_SOCKET=$socket \
 --add-host=docker:$docker_host \
 bradjones/conductor:latest "$@"

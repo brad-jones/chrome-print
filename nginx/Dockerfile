@@ -19,6 +19,8 @@ ADD ["container-files","/"]
 # Publish standard http and httpd ports
 EXPOSE 80 443
 
+# Add our chrome user, nginx and php-fpm also run as the chorme user.
+# This is so that documents printed by google chrome can be read by php.
 RUN useradd -ms /bin/bash chrome
 RUN chown -R chrome:chrome /home/chrome
 

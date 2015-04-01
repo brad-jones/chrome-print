@@ -2,62 +2,132 @@
 
 use RuntimeException;
 use Symfony\Component\Process\Process;
+use Symfony\Component\HttpFoundation\Session\Session;
 
 class XdoTool
 {
 	/**
-	 * This refers to the X display number, by default xvfb-run uses 99.
+	 * This refers to the X display number that be will be using.
 	 */
-	private $display = '99';
+	private $display;
 	
 	/**
 	 * The location that we will instruct Google Chrome to print the PDF to.
-	 * NOTE: It is a shared volume, part of the storage container.
+	 *
+	 * The filename will contain the display number so that we don't
+	 * overwrite anyone elses files.
+	 *
+	 * It is stored on a shared volume, part of the storage container.
 	 */
-	private $pdfFile = '/mnt/printed/document.pdf';
+	private $pdfFile;
 	
 	/**
-	 * Makes sure Chrome is in a state that is ready for use.
+	 * A simple file that we use to keep count of how many X displays we have.
 	 *
-	 * > NOTE: This constructor will only run once per boot.
-	 * > The file ```/tmp/google-chrome-setup``` will be deleted by
-	 * > the CMD set in the Dockerfile.
+	 * Down the track this may get put into an Sqlite DB
+	 * or other Key Value Store if we need to store other data as well.
 	 *
-	 * It is important that the chrome window is maximised
-	 * so that mouse pointer locations are accurate.
+	 * But for now it's a simple file with a number in it.
 	 */
-	public function __construct()
+	private $displayCounter = '/tmp/chrome-print-displays';
+
+	/**
+	 * Xvfb Container Setup
+	 *
+	 * It goes without saying that 2 users would have an extremely hard time
+	 * using the keyboard and mouse at the same time. The same is true when one
+	 * sends xdotool commands simultanously to the same instance of Chrome.
+	 * In short all hell breaks loss.
+	 *
+	 * Thus we use browser sessions to keep track of our xvfb containers.
+	 * Each browser session get's it's own xvfb container and can only perform
+	 * one document conversion at a time.
+	 *
+	 * So if you are using a basic "CURL" command or other tech that does not
+	 * support cookies to make the requests to the REST service, please keep in
+	 * mind that every request you make will start a new browser session and
+	 * your document generation times will suffer as a result.
+	 *
+	 * If you maintain multiple browser sessions you can effetivly create as
+	 * many xvfb workers as you like, just like say nginx or php-fpm.
+	 * One day this worker management may become somewhat more transparent...
+	 */
+	public function __construct(Session $session)
 	{
-		// We only need to perform this the once for each boot
-		if (file_exists('/tmp/google-chrome-setup')) return;
+		// Has the session already been started?
+		if ($session->has('display'))
+		{
+			// It has so just use the existing X display,
+			// there is no need to start a new container.
+			$this->display = $session->get('display');
+		}
+		else
+		{
+			// Keep track of how many X displays we have running.
+			if (file_exists($this->displayCounter))
+			{
+				$this->display = file_get_contents($this->displayCounter) + 1;
+			}
+			else
+			{
+				// Start at 99 just like xvfb-run does by default
+				$this->display = 99;
+			}
+
+			file_put_contents($this->displayCounter, $this->display);
+
+			// Save the new display number to the session
+			$session->set('display', $this->display);
+
+			// Create a new instance of chrome.
+			$this->runProcess
+			(
+				'docker run -d '.
+				'--name chrome-print-xvfb-'.$this->display.' '.
+				'--env DISPLAY='.$this->display.' '.
+				'--volumes-from chrome-print-storage '.
+				'--add-host docker:'.gethostbyname('docker').' '.
+				'bradjones/chrome-print-xvfb'
+			);
+
+			// Wait for chrome to start up
+			sleep(5);
+
+			// Resize the chrome window
+			$this->runProcess($this->grabChrome('windowmove --sync 0 0'));
+			$this->runProcess($this->grabChrome('windowsize --sync 100% 100%'));
+
+			// Wait for the window resize to take effect
+			sleep(1);
+
+			// Close the sandbox notice
+			$this->setMousePos(1343, 79)->leftClick();
+
+			// Open print preview
+			$this->sendKeysToChrome('ctrl+p');
+
+			// Wait for the preview to open
+			// TODO: Instead of all this waiting bullshit lets use visgrep
+			// To detect when certian things exist on the screen, etc.
+			// http://manpages.ubuntu.com/manpages/dapper/man1/visgrep.1.html
+			sleep(1);
+
+			// Enable background graphics
+			$this->setMousePos(140, 578)->leftClick();
+
+			// Close the print preview box
+			$this->setMousePos(226, 147)->leftClick();
+
+			// Wait for print preview to close
+			sleep(1);
+		}
 		
-		// Resize the chrome window
-		$this->runProcess($this->grabChrome('windowmove --sync 0 0'));
-		$this->runProcess($this->grabChrome('windowsize --sync 100% 100%'));
+		// Set the file name of printed pdf
+		$this->pdfFile = '/mnt/printed/document_'.$this->display.'.pdf';
 		
-		// Wait for the window resize to take effect
-		sleep(1);
-		
-		// Close the sandbox notice
-		$this->setMousePos(1343, 79)->leftClick();
-		
-		// Open print preview
-		$this->sendKeysToChrome('ctrl+p');
-		
-		// Wait for the preview to open
-		sleep(1);
-		
-		// Enable background graphics
-		$this->setMousePos(140, 578)->leftClick();
-		
-		// Close the print preview box
-		$this->setMousePos(226, 147)->leftClick();
-		
-		// Wait for print preview to close
-		sleep(1);
-		
-		// Write our temp file so we know that next time we can skip this
-		touch('/tmp/google-chrome-setup');
+		// This is important, if we don't do this we run
+		// into the session locking issues.
+		$session->save();
 	}
 	
 	/**
@@ -94,6 +164,8 @@ class XdoTool
 		$this->sendKeysToChrome('ctrl+p');
 		
 		// Wait again for the print preview to load
+		// It would seem the amount of time it takes for the print preview to
+		// finish rendering is relative to the time it takes to load the page.
 		sleep($wait);
 		
 		// Click the Layout drop down
@@ -118,11 +190,7 @@ class XdoTool
 			case 'legal': $this->setMousePos(304, 500)->leftClick(); break;
 			case 'tabloid': $this->setMousePos(304, 515)->leftClick(); break;
 		}
-		
-		// Wait for the layout and paper size settings to take effect.
-		// When we set layout and paper size it resets the margin dropdown box.
-		sleep(1);
-		
+
 		// Click on margins drop down
 		$this->setMousePos(304, 496)->leftClick();
 		
@@ -130,9 +198,7 @@ class XdoTool
 		// We force the margins to none so that we can use
 		// CSS to provide ultimate control of the layout.
 		$this->setMousePos(304, 533)->leftClick();
-		
-		sleep(1);
-		
+
 		// Now click the save button
 		$this->setMousePos(290, 150)->leftClick();
 		
@@ -148,26 +214,45 @@ class XdoTool
 		// Type in the temp filename
 		$this->type($this->pdfFile);
 
+		// Wait for the filename to be typed in.
 		sleep(1);
 		
 		// Click the save button
 		$this->setMousePos(740, 550)->leftClick();
 		
-		// Wait for PDF to be generated
-		sleep(5);
+		// Wait for PDF file to exist
+		while (!file_exists($this->pdfFile)){ usleep(100); }
 		
-		// Read pdf
-		$pdf = file_get_contents($this->pdfFile);
+		// Wait for pdf file to be finished writing
+		// Because chrome is running in another container we can't use
+		// lsof or other similar type solutions. I think the ideal solution
+		// would be to use incond inside the xvfb container to write another
+		// dummy file the second the pdf is closed by chrome. But this seems
+		// to work for now.
+		do
+		{
+			$pdf1 = file_get_contents($this->pdfFile);
+			usleep(100);
+			$pdf2 = file_get_contents($this->pdfFile);
+		}
+		while($pdf1 != $pdf2);
 		
 		// Delete printed pdf file
 		unlink($this->pdfFile);
 		
+		// Shutdown and destroy the chrome container
+		/*$this->runProcess
+		(
+			'docker stop chrome-print-xvfb-'.$this->display.' && '.
+			'docker rm chrome-print-xvfb-'.$this->display
+		);*/
+
 		// Return pdf
-		return $pdf;
+		return $pdf1;
 	}
 	
 	/**
-	 * Takes a PNG screenshot of the X Virtaul Frame Buffer.
+	 * Takes a PNG screenshot of the X Virtual Frame Buffer.
 	 *
 	 * This is very useful in debugging, as normally you have no way of seeing
 	 * what is actually happening. It's most useful feature is being able to

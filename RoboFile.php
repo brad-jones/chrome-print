@@ -4,9 +4,361 @@ use Gears\String as Str;
 
 class RoboFile extends Brads\Robo\Tasks
 {
-	private $http_port = '8081';
-	private $https_port = '8082';
+	/**
+	 * Pull down all our images from docker hub. Use this to update your images.
+	 */
+	public function pull()
+	{
+		$this->taskExec('docker pull bradjones/chrome-print-storage')->run();
+		$this->taskExec('docker pull bradjones/chrome-print-xvfb')->run();
+		$this->taskExec('docker pull bradjones/chrome-print-php-fpm')->run();
+		$this->taskExec('docker pull bradjones/chrome-print-nginx')->run();
+	}
 	
+	/**
+	 * Shortcut to create all containers.
+	 */
+	public function create()
+	{
+		$this->createStorage();
+		$this->createPhpFpm();
+		$this->createNginx();
+	}
+
+	/**
+	 * Creates the shared storage docker container.
+	 */
+	public function createStorage()
+	{
+		$this->taskExec('docker')
+			->arg('create')
+			->option('name', 'chrome-print-storage')
+			->arg('bradjones/chrome-print-storage')
+		->run();
+	}
+
+	/**
+	 * Creates the php-fpm container.
+	 */
+	public function createPhpFpm()
+	{
+		// Php needs access to the host docker process
+		// to auto spawn the xvfb containers.
+		$docker = getenv('CONDUCTOR_DOCKER_BIN');
+		$socket = getenv('CONDUCTOR_DOCKER_SOCKET');
+
+		$this->taskExec('docker')
+			->arg('create')
+			->option('name', 'chrome-print-php-fpm')
+			->option('volumes-from', 'chrome-print-storage')
+			->arg('-v '.$docker.':'.$docker)
+			->arg('-v '.$socket.':'.$socket)
+			->option('add-host', 'docker:'.getenv('CONDUCTOR_HOST'))
+			->option('restart', 'on-failure:10')
+			->arg('bradjones/chrome-print-php-fpm')
+		->run();
+	}
+
+	/**
+	 * Creates the nginx container.
+	 */
+	public function createNginx()
+	{
+		$this->taskExec('docker')
+			->arg('create')
+			->arg('-P')
+			->option('name', 'chrome-print-nginx')
+			->option('volumes-from', 'chrome-print-storage')
+			->option('restart', 'on-failure:10')
+			->arg('bradjones/chrome-print-nginx')
+		->run();
+	}
+	
+	/**
+	 * Shortcut to start all our containers.
+	 */
+	public function start()
+	{
+		$this->startPhpFpm();
+		$this->startNginx();
+	}
+
+	/**
+	 * Starts the created php-fpm container.
+	 */
+	public function startPhpFpm()
+	{
+		$this->taskDockerStart('chrome-print-php-fpm')->run();
+	}
+
+	/**
+	 * Starts the created nginx container.
+	 */
+	public function startNginx()
+	{
+		$this->taskDockerStart('chrome-print-nginx')->run();
+
+		// Grab the dynamic ports that have been exposed to the host.
+		$containers = Str::s
+		(
+			$this->taskExec('docker')
+				->arg('ps')
+				->printed(false)
+				->run()
+				->getMessage()
+		);
+
+		// Find the line that ends with "chrome-print-nginx"
+		foreach ($containers->split("\n") as $container)
+		{
+			$container = Str::s(trim($container->toString()));
+
+			if ($container->endsWith('chrome-print-nginx'))
+			{
+				// Extract the ports
+				$http = $container->wildCardMatch(', 0.0.0.0:*->80/tcp')[1][0];
+				$https = $container->wildCardMatch('0.0.0.0:*->443/tcp')[1][0];
+
+				// Display a nice little message
+				$this->yell('Google Chrome Print has Started!');
+				$this->say('You may access it by going to:');
+				$this->say('http://'.getenv('CONDUCTOR_HOST').':'.$http);
+				$this->say('OR');
+				$this->say('https://'.getenv('CONDUCTOR_HOST').':'.$https);
+			}
+		}
+	}
+	
+	/**
+	 * Shortcut to stop all our containers.
+	 */
+	public function stop()
+	{
+		$this->stopXvfb();
+		$this->stopPhpFpm();
+		$this->stopNginx();
+	}
+
+	/**
+	 * Stops all remaining instances of chrome-print-xvfb
+	 */
+	public function stopXvfb()
+	{
+		// Grab a list of running containers
+		$containers = Str::s
+		(
+			$this->taskExec('docker')
+				->arg('ps')
+				->printed(false)
+				->run()
+				->getMessage()
+		);
+
+		// Find the lines that have "bradjones/chrome-print-xvfb:latest"
+		foreach ($containers->split("\n") as $container)
+		{
+			if ($container->contains('bradjones/chrome-print-xvfb:latest'))
+			{
+				// Extract the container name
+				$name = trim($container->match('/chrome-print-xvfb-\d+/')[0]->toString());
+
+				// Stop the container
+				$this->taskDockerStop($name)->run();
+			}
+		}
+	}
+
+	/**
+	 * Stops the running php-fpm container.
+	 */
+	public function stopPhpFpm()
+	{
+		$this->taskDockerStop('chrome-print-php-fpm')->run();
+	}
+
+	/**
+	 * Stops the running nginx container.
+	 */
+	public function stopNginx()
+	{
+		$this->taskDockerStop('chrome-print-nginx')->run();
+	}
+	
+	/**
+	 * Run start and then stop.
+	 */
+	public function restart()
+	{
+		$this->stop();
+		$this->start();
+	}
+	
+	/**
+	 * Shortcut to removes all our containers.
+	 */
+	public function remove($opts = ['destroy-data' => false])
+	{
+		// NOTE: There appears to be a bug with $this->taskDockerRemove()
+		
+		if ($opts['destroy-data'])
+		{
+			$this->removeStorage();
+		}
+		
+		$this->removeXvfb();
+		$this->removePhpFpm();
+		$this->removeNginx();
+	}
+
+	/**
+	 * Removes the shared storage container, use with caution!
+	 */
+	public function removeStorage()
+	{
+		$this->taskExec('docker rm chrome-print-storage')->run();
+	}
+
+	/**
+	 * Removes any remaining instances of chrome-print-xvfb
+	 */
+	public function removeXvfb()
+	{
+		// Grab the dynamic ports that have been exposed to the host.
+		$containers = Str::s
+		(
+			$this->taskExec('docker')
+				->arg('ps')
+				->arg('-a')
+				->printed(false)
+				->run()
+				->getMessage()
+		);
+
+		// Find the lines that have "bradjones/chrome-print-xvfb:latest"
+		foreach ($containers->split("\n") as $container)
+		{
+			if ($container->contains('bradjones/chrome-print-xvfb:latest'))
+			{
+				// Extract the container name
+				$name = trim($container->match('/chrome-print-xvfb-\d+/')[0]->toString());
+
+				// Remove the container
+				$this->taskExec('docker rm '.$name)->run();
+			}
+		}
+	}
+
+	/**
+	 * Removes a stoped php-fpm container.
+	 */
+	public function removePhpFpm()
+	{
+		$this->taskExec('docker rm chrome-print-php-fpm')->run();
+	}
+
+	/**
+	 * Removes a stoped nginx container.
+	 */
+	public function removeNginx()
+	{
+		$this->taskExec('docker rm chrome-print-nginx')->run();
+	}
+	
+	/**
+	 * Shortcut to removes all our images. Dev use only!
+	 *
+	 * This is pretty extreme, we would only use this if we needed
+	 * to bust some docker cache.
+	 */
+	public function removeImages()
+	{
+		$this->removeImagesStorage();
+		$this->removeImagesXvfb();
+		$this->removeImagesPhpFpm();
+		$this->removeImagesNginx();
+	}
+
+	/**
+	 * Forceably removes the storage image.
+	 */
+	public function removeImagesStorage()
+	{
+		$this->taskExec('docker rmi -f bradjones/chrome-print-storage')->run();
+	}
+
+	/**
+	 * Forceably removes the xvfb image.
+	 */
+	public function removeImagesXvfb()
+	{
+		$this->taskExec('docker rmi -f bradjones/chrome-print-xvfb')->run();
+	}
+
+	/**
+	 * Forceably removes the php-fpm image.
+	 */
+	public function removeImagesPhpFpm()
+	{
+		$this->taskExec('docker rmi -f bradjones/chrome-print-php-fpm')->run();
+	}
+
+	/**
+	 * Forceably removes the nginx image.
+	 */
+	public function removeImagesNginx()
+	{
+		$this->taskExec('docker rmi -f bradjones/chrome-print-nginx')->run();
+	}
+	
+	/**
+	 * Build all the images. Dev use only!
+	 *
+	 * This should only be used if developing the images.
+	 * For production use the pulled images from docker hub.
+	 */
+	public function build()
+	{
+		$this->taskDockerBuild('storage')->tag('bradjones/chrome-print-storage')->run();
+		$this->taskDockerBuild('xvfb')->tag('bradjones/chrome-print-xvfb')->run();
+		$this->taskDockerBuild('php-fpm')->tag('bradjones/chrome-print-php-fpm')->run();
+		$this->taskDockerBuild('nginx')->tag('bradjones/chrome-print-nginx')->run();
+	}
+	
+	/**
+	 * Stops, removes, builds, creates & starts. Dev use only!
+	 */
+	public function reload($opts = ['destroy-images' => false])
+	{
+		// First make sure any previous containers are stopped
+		$this->stop();
+		
+		// Next remove those containers
+		$this->remove(['destroy-data' => true]);
+		
+		// Do a full rebuild, remove the actual images as well
+		if ($opts['destroy-images']) $this->removeImages();
+		
+		// Now build some new images
+		$this->build();
+		
+		// While developing we want the main www root bind mounted to the host.
+		// So that as we make changes to the php it is reflected striaght away
+		// like you would be used to in a normal non docker environment.
+		$this->taskExec('docker')
+			->arg('create')
+			->arg('-v '.getenv('CONDUCTOR_ROOT').'/storage/container-files/var/www/html:/var/www/html')
+			->option('name', 'chrome-print-storage')
+			->arg('bradjones/chrome-print-storage')
+		->run();
+		
+		// Create the remaining containers
+		$this->createPhpFpm();
+		$this->createNginx();
+		
+		// And start the containers
+		$this->start();
+	}
+
 	/**
 	 * Converts a HTML document into a PDF document using Google Chrome.
 	 *
@@ -39,7 +391,7 @@ class RoboFile extends Brads\Robo\Tasks
 				'You must provide a HTML document to convert to PDF!'
 			);
 		}
-		
+
 		// Grab a list of all the docker containers on the host
 		$containers = Str::s
 		(
@@ -88,11 +440,11 @@ class RoboFile extends Brads\Robo\Tasks
 			// container you can run ./conductor stop:xvfb
 			// And if you then want to remove it also: ./conductor remove:xvfb
 		}
-		
+
 		// Now lets run a temporary version of the php-fpm container.
 		// This container has xdotool and all other needed libs.
 		// It seemed a waste to create yet another container just for this.
-		
+
 		/*
 		$result = $this->taskDockerRun('bradjones/chrome-print-php-fpm')
 			->interactive()
@@ -102,257 +454,8 @@ class RoboFile extends Brads\Robo\Tasks
 			->printed(false)
 			->run()
 		->getMessage();
-		
+
 		var_dump($result);
 		*/
-	}
-	
-	/**
-	 * Pull down all our images from docker hub. Use this to update your images.
-	 */
-	public function pull()
-	{
-		$this->taskExec('docker pull bradjones/chrome-print-storage')->run();
-		$this->taskExec('docker pull bradjones/chrome-print-xvfb')->run();
-		$this->taskExec('docker pull bradjones/chrome-print-php-fpm')->run();
-		$this->taskExec('docker pull bradjones/chrome-print-nginx')->run();
-	}
-	
-	/**
-	 * Shortcut to create all containers.
-	 */
-	public function create()
-	{
-		$this->createStorage();
-		$this->createXvfb();
-		$this->createPhpFpm();
-		$this->createNginx();
-	}
-
-	public function createStorage()
-	{
-		$this->taskExec('docker')
-			->arg('create')
-			->option('name', 'chrome-print-storage')
-			->arg('bradjones/chrome-print-storage')
-		->run();
-	}
-
-	public function createXvfb()
-	{
-		$this->taskExec('docker')
-			->arg('create')
-			->option('name', 'chrome-print-xvfb')
-			->option('volumes-from', 'chrome-print-storage')
-			->option('add-host', 'docker:'.getenv('CONDUCTOR_HOST'))
-			->option('restart', 'on-failure:10')
-			->arg('bradjones/chrome-print-xvfb')
-		->run();
-	}
-
-	public function createPhpFpm()
-	{
-		$this->taskExec('docker')
-			->arg('create')
-			->option('name', 'chrome-print-php-fpm')
-			->option('volumes-from', 'chrome-print-storage')
-			->option('add-host', 'docker:'.getenv('CONDUCTOR_HOST'))
-			->option('restart', 'on-failure:10')
-			->arg('bradjones/chrome-print-php-fpm')
-		->run();
-	}
-
-	public function createNginx()
-	{
-		$this->taskExec('docker')
-			->arg('create')
-			->option('name', 'chrome-print-nginx')
-			->option('volumes-from', 'chrome-print-storage')
-			->option('add-host', 'docker:'.getenv('CONDUCTOR_HOST'))
-			->option('restart', 'on-failure:10')
-			->option('-p', $this->http_port.':80')
-			->option('-p', $this->https_port.':443')
-			->arg('bradjones/chrome-print-nginx')
-		->run();
-	}
-	
-	/**
-	 * Shortcut to start all our containers.
-	 */
-	public function start()
-	{
-		$this->startXvfb();
-		$this->startPhpFpm();
-		$this->startNginx();
-	}
-
-	public function startXvfb()
-	{
-		$this->taskDockerStart('chrome-print-xvfb')->run();
-	}
-
-	public function startPhpFpm()
-	{
-		$this->taskDockerStart('chrome-print-php-fpm')->run();
-	}
-
-	public function startNginx()
-	{
-		$this->taskDockerStart('chrome-print-nginx')->run();
-	}
-	
-	/**
-	 * Shortcut to stop all our containers.
-	 */
-	public function stop()
-	{
-		$this->stopXvfb();
-		$this->stopPhpFpm();
-		$this->stopNginx();
-	}
-
-	public function stopXvfb()
-	{
-		$this->taskDockerStop('chrome-print-xvfb')->run();
-	}
-
-	public function stopPhpFpm()
-	{
-		$this->taskDockerStop('chrome-print-php-fpm')->run();
-	}
-
-	public function stopNginx()
-	{
-		$this->taskDockerStop('chrome-print-nginx')->run();
-	}
-	
-	/**
-	 * Run start and then stop.
-	 */
-	public function restart()
-	{
-		$this->stop();
-		$this->start();
-	}
-	
-	/**
-	 * Shortcut to removes all our containers.
-	 */
-	public function remove($opts = ['destroy-data' => false])
-	{
-		// NOTE: There appears to be a bug with $this->taskDockerRemove()
-		
-		if ($opts['destroy-data'])
-		{
-			$this->removeStorage();
-		}
-		
-		$this->removeXvfb();
-		$this->removePhpFpm();
-		$this->removeNginx();
-	}
-
-	public function removeStorage()
-	{
-		$this->taskExec('docker rm chrome-print-storage')->run();
-	}
-
-	public function removeXvfb()
-	{
-		$this->taskExec('docker rm chrome-print-xvfb')->run();
-	}
-
-	public function removePhpFpm()
-	{
-		$this->taskExec('docker rm chrome-print-php-fpm')->run();
-	}
-
-	public function removeNginx()
-	{
-		$this->taskExec('docker rm chrome-print-nginx')->run();
-	}
-	
-	/**
-	 * Shortcut to removes all our images. Dev use only!
-	 *
-	 * This is pretty extreme, we would only use this if we needed
-	 * to bust some docker cache.
-	 */
-	public function removeImages()
-	{
-		$this->removeImagesStorage();
-		$this->removeImagesXvfb();
-		$this->removeImagesPhpFpm();
-		$this->removeImagesNginx();
-	}
-
-	public function removeImagesStorage()
-	{
-		$this->taskExec('docker rmi -f bradjones/chrome-print-storage')->run();
-	}
-
-	public function removeImagesXvfb()
-	{
-		$this->taskExec('docker rmi -f bradjones/chrome-print-xvfb')->run();
-	}
-
-	public function removeImagesPhpFpm()
-	{
-		$this->taskExec('docker rmi -f bradjones/chrome-print-php-fpm')->run();
-	}
-
-	public function removeImagesNginx()
-	{
-		$this->taskExec('docker rmi -f bradjones/chrome-print-nginx')->run();
-	}
-	
-	/**
-	 * Build all the images. Dev use only!
-	 *
-	 * This should only be used if developing the images.
-	 * For production use the pulled images from docker hub.
-	 */
-	public function build()
-	{
-		$this->taskDockerBuild('storage')->tag('bradjones/chrome-print-storage')->run();
-		$this->taskDockerBuild('xvfb')->tag('bradjones/chrome-print-xvfb')->run();
-		$this->taskDockerBuild('php-fpm')->tag('bradjones/chrome-print-php-fpm')->run();
-		$this->taskDockerBuild('nginx')->tag('bradjones/chrome-print-nginx')->run();
-	}
-	
-	/**
-	 * Stops, removes, builds, creates & starts. Dev use only!
-	 */
-	public function reload($opts = ['destroy-images' => false])
-	{
-		// First make sure any previous containers are stopped
-		$this->stop();
-		
-		// Next remove those containers
-		$this->remove(['destroy-data' => true]);
-		
-		// Do a full rebuild, remove the actual images as well
-		if ($opts['destroy-images']) $this->removeImages();
-		
-		// Now build some new images
-		$this->build();
-		
-		// While developing we want the main www root bind mounted to the host.
-		// So that as we make changes to the php it is reflected striaght away
-		// like you would be used to in a normal non docker environment.
-		$this->taskExec('docker')
-			->arg('create')
-			->arg('-v '.getenv('CONDUCTOR_ROOT').'/storage/container-files/var/www/html:/var/www/html')
-			->option('name', 'chrome-print-storage')
-			->arg('bradjones/chrome-print-storage')
-		->run();
-		
-		// Create the remaining containers
-		$this->createXvfb();
-		$this->createPhpFpm();
-		$this->createNginx();
-		
-		// And start the containers
-		$this->start();
 	}
 }
