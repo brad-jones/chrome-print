@@ -11,7 +11,7 @@ RUN yum -y update && yum clean all
 
 # Install packages
 RUN yum -y install \
-	lsof \
+	xautomation \
 	xdotool \
 	ImageMagick \
 	php-cli \

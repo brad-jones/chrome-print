@@ -159,11 +159,16 @@ class RoboFile extends Brads\Robo\Tasks
 		{
 			if ($container->contains('bradjones/chrome-print-xvfb:latest'))
 			{
-				// Extract the container name
-				$name = trim($container->match('/chrome-print-xvfb-\d+/')[0]->toString());
+				$matches = $container->match('/chrome-print-xvfb-\d+/');
 
-				// Stop the container
-				$this->taskDockerStop($name)->run();
+				if (count($matches) > 0)
+				{
+					// Extract the container name
+					$name = trim($matches[0]->toString());
+
+					// Stop the container
+					$this->taskDockerStop($name)->run();
+				}
 			}
 		}
 	}
@@ -239,11 +244,16 @@ class RoboFile extends Brads\Robo\Tasks
 		{
 			if ($container->contains('bradjones/chrome-print-xvfb:latest'))
 			{
-				// Extract the container name
-				$name = trim($container->match('/chrome-print-xvfb-\d+/')[0]->toString());
+				$matches = $container->match('/chrome-print-xvfb-\d+/');
 
-				// Remove the container
-				$this->taskExec('docker rm '.$name)->run();
+				if (count($matches) > 0)
+				{
+					// Extract the container name
+					$name = trim($matches[0]->toString());
+
+					// Remove the container
+					$this->taskExec('docker rm '.$name)->run();
+				}
 			}
 		}
 	}
