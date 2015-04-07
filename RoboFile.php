@@ -228,7 +228,7 @@ class RoboFile extends Brads\Robo\Tasks
 	 */
 	public function removeXvfb()
 	{
-		// Grab the dynamic ports that have been exposed to the host.
+		// Grab all containers
 		$containers = Str::s
 		(
 			$this->taskExec('docker')
@@ -267,7 +267,7 @@ class RoboFile extends Brads\Robo\Tasks
 	}
 
 	/**
-	 * Removes a stoped nginx container.
+	 * Removes a stopped nginx container.
 	 */
 	public function removeNginx()
 	{
