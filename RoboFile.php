@@ -368,9 +368,9 @@ class RoboFile extends Brads\Robo\Tasks
 	{
 		$this->taskDockerBuild('storage')->tag('bradjones/chrome-print-storage')->run();
 		$this->taskDockerBuild('xvfb')->tag('bradjones/chrome-print-xvfb')->run();
-		$this->taskDockerBuild('xvfb-pool')->tag('bradjones/chrome-print-xvfb-pool')->run();
 		$this->taskDockerBuild('php-fpm')->tag('bradjones/chrome-print-php-fpm')->run();
 		$this->taskDockerBuild('nginx')->tag('bradjones/chrome-print-nginx')->run();
+		$this->taskDockerBuild('xvfb-pool')->tag('bradjones/chrome-print-xvfb-pool')->run();
 	}
 	
 	/**
