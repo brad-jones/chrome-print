@@ -13,6 +13,7 @@ class RoboFile extends Brads\Robo\Tasks
 		$this->taskExec('docker pull bradjones/chrome-print-xvfb')->run();
 		$this->taskExec('docker pull bradjones/chrome-print-php-fpm')->run();
 		$this->taskExec('docker pull bradjones/chrome-print-nginx')->run();
+		$this->taskExec('docker pull bradjones/chrome-print-xvfb-pool')->run();
 	}
 	
 	/**
@@ -23,8 +24,9 @@ class RoboFile extends Brads\Robo\Tasks
 		$this->createStorage();
 		$this->createPhpFpm();
 		$this->createNginx();
+		$this->createXvfbPool();
 	}
-
+	
 	/**
 	 * Creates the shared storage docker container.
 	 */
@@ -36,29 +38,21 @@ class RoboFile extends Brads\Robo\Tasks
 			->arg('bradjones/chrome-print-storage')
 		->run();
 	}
-
+	
 	/**
 	 * Creates the php-fpm container.
 	 */
 	public function createPhpFpm()
 	{
-		// Php needs access to the host docker process
-		// to auto spawn the xvfb containers.
-		$docker = getenv('CONDUCTOR_DOCKER_BIN');
-		$socket = getenv('CONDUCTOR_DOCKER_SOCKET');
-
 		$this->taskExec('docker')
 			->arg('create')
 			->option('name', 'chrome-print-php-fpm')
 			->option('volumes-from', 'chrome-print-storage')
-			->arg('-v '.$docker.':'.$docker)
-			->arg('-v '.$socket.':'.$socket)
-			->option('add-host', 'docker:'.getenv('CONDUCTOR_HOST'))
 			->option('restart', 'on-failure:10')
 			->arg('bradjones/chrome-print-php-fpm')
 		->run();
 	}
-
+	
 	/**
 	 * Creates the nginx container.
 	 */
@@ -75,14 +69,45 @@ class RoboFile extends Brads\Robo\Tasks
 	}
 	
 	/**
+	 * Creates our xvfb pool manager.
+	 */
+	public function createXvfbPool()
+	{
+		// Php needs access to the host docker process
+		// to auto spawn the xvfb containers.
+		$docker = getenv('CONDUCTOR_DOCKER_BIN');
+		$socket = getenv('CONDUCTOR_DOCKER_SOCKET');
+		
+		$this->taskExec('docker')
+			->arg('create')
+			->option('name', 'chrome-print-xvfb-pool')
+			->option('volumes-from', 'chrome-print-storage')
+			->arg('-v '.$docker.':'.$docker)
+			->arg('-v '.$socket.':'.$socket)
+			->option('add-host', 'docker:'.getenv('CONDUCTOR_HOST'))
+			->option('restart', 'on-failure:10')
+			->arg('bradjones/chrome-print-xvfb-pool')
+		->run();
+	}
+	
+	/**
 	 * Shortcut to start all our containers.
 	 */
 	public function start()
 	{
+		$this->startXvfbPool();
 		$this->startPhpFpm();
 		$this->startNginx();
 	}
-
+	
+	/**
+	 * Starts our xvfb pool manager, should be started first!
+	 */
+	public function startXvfbPool()
+	{
+		$this->taskDockerStart('chrome-print-xvfb-pool')->run();
+	}
+	
 	/**
 	 * Starts the created php-fpm container.
 	 */
@@ -90,14 +115,14 @@ class RoboFile extends Brads\Robo\Tasks
 	{
 		$this->taskDockerStart('chrome-print-php-fpm')->run();
 	}
-
+	
 	/**
 	 * Starts the created nginx container.
 	 */
 	public function startNginx()
 	{
 		$this->taskDockerStart('chrome-print-nginx')->run();
-
+		
 		// Grab the dynamic ports that have been exposed to the host.
 		$containers = Str::s
 		(
@@ -107,18 +132,18 @@ class RoboFile extends Brads\Robo\Tasks
 				->run()
 				->getMessage()
 		);
-
+		
 		// Find the line that ends with "chrome-print-nginx"
 		foreach ($containers->split("\n") as $container)
 		{
 			$container = Str::s(trim($container->toString()));
-
+			
 			if ($container->endsWith('chrome-print-nginx'))
 			{
 				// Extract the ports
 				$http = $container->wildCardMatch(', 0.0.0.0:*->80/tcp')[1][0];
 				$https = $container->wildCardMatch('0.0.0.0:*->443/tcp')[1][0];
-
+				
 				// Display a nice little message
 				$this->yell('Google Chrome Print has Started!');
 				$this->say('You may access it by going to:');
@@ -138,12 +163,14 @@ class RoboFile extends Brads\Robo\Tasks
 		$this->stopPhpFpm();
 		$this->stopNginx();
 	}
-
+	
 	/**
-	 * Stops all remaining instances of chrome-print-xvfb
+	 * Stops the pool manager and all remaining instances of chrome-print-xvfb
 	 */
 	public function stopXvfb()
 	{
+		$this->taskDockerStop('chrome-print-xvfb-pool')->run();
+		
 		// Grab a list of running containers
 		$containers = Str::s
 		(
@@ -153,26 +180,26 @@ class RoboFile extends Brads\Robo\Tasks
 				->run()
 				->getMessage()
 		);
-
+		
 		// Find the lines that have "bradjones/chrome-print-xvfb:latest"
 		foreach ($containers->split("\n") as $container)
 		{
 			if ($container->contains('bradjones/chrome-print-xvfb:latest'))
 			{
 				$matches = $container->match('/chrome-print-xvfb-\d+/');
-
+				
 				if (count($matches) > 0)
 				{
 					// Extract the container name
 					$name = trim($matches[0]->toString());
-
+					
 					// Stop the container
 					$this->taskDockerStop($name)->run();
 				}
 			}
 		}
 	}
-
+	
 	/**
 	 * Stops the running php-fpm container.
 	 */
@@ -180,7 +207,7 @@ class RoboFile extends Brads\Robo\Tasks
 	{
 		$this->taskDockerStop('chrome-print-php-fpm')->run();
 	}
-
+	
 	/**
 	 * Stops the running nginx container.
 	 */
@@ -214,7 +241,7 @@ class RoboFile extends Brads\Robo\Tasks
 		$this->removePhpFpm();
 		$this->removeNginx();
 	}
-
+	
 	/**
 	 * Removes the shared storage container, use with caution!
 	 */
@@ -222,12 +249,14 @@ class RoboFile extends Brads\Robo\Tasks
 	{
 		$this->taskExec('docker rm chrome-print-storage')->run();
 	}
-
+	
 	/**
-	 * Removes any remaining instances of chrome-print-xvfb
+	 * Removes the pool manager and any remaining instances of chrome-print-xvfb
 	 */
 	public function removeXvfb()
 	{
+		$this->taskExec('docker rm chrome-print-xvfb-pool')->run();
+		
 		// Grab all containers
 		$containers = Str::s
 		(
@@ -238,26 +267,26 @@ class RoboFile extends Brads\Robo\Tasks
 				->run()
 				->getMessage()
 		);
-
+		
 		// Find the lines that have "bradjones/chrome-print-xvfb:latest"
 		foreach ($containers->split("\n") as $container)
 		{
 			if ($container->contains('bradjones/chrome-print-xvfb:latest'))
 			{
 				$matches = $container->match('/chrome-print-xvfb-\d+/');
-
+				
 				if (count($matches) > 0)
 				{
 					// Extract the container name
 					$name = trim($matches[0]->toString());
-
+					
 					// Remove the container
 					$this->taskExec('docker rm '.$name)->run();
 				}
 			}
 		}
 	}
-
+	
 	/**
 	 * Removes a stoped php-fpm container.
 	 */
@@ -265,7 +294,7 @@ class RoboFile extends Brads\Robo\Tasks
 	{
 		$this->taskExec('docker rm chrome-print-php-fpm')->run();
 	}
-
+	
 	/**
 	 * Removes a stopped nginx container.
 	 */
@@ -284,10 +313,11 @@ class RoboFile extends Brads\Robo\Tasks
 	{
 		$this->removeImagesStorage();
 		$this->removeImagesXvfb();
+		$this->removeImagesXvfbPool();
 		$this->removeImagesPhpFpm();
 		$this->removeImagesNginx();
 	}
-
+	
 	/**
 	 * Forceably removes the storage image.
 	 */
@@ -295,7 +325,7 @@ class RoboFile extends Brads\Robo\Tasks
 	{
 		$this->taskExec('docker rmi -f bradjones/chrome-print-storage')->run();
 	}
-
+	
 	/**
 	 * Forceably removes the xvfb image.
 	 */
@@ -303,7 +333,15 @@ class RoboFile extends Brads\Robo\Tasks
 	{
 		$this->taskExec('docker rmi -f bradjones/chrome-print-xvfb')->run();
 	}
-
+	
+	/**
+	 * Forceably removes the xvfb-pool image.
+	 */
+	public function removeImagesXvfbPool()
+	{
+		$this->taskExec('docker rmi -f bradjones/chrome-print-xvfb-pool')->run();
+	}
+	
 	/**
 	 * Forceably removes the php-fpm image.
 	 */
@@ -311,7 +349,7 @@ class RoboFile extends Brads\Robo\Tasks
 	{
 		$this->taskExec('docker rmi -f bradjones/chrome-print-php-fpm')->run();
 	}
-
+	
 	/**
 	 * Forceably removes the nginx image.
 	 */
@@ -330,6 +368,7 @@ class RoboFile extends Brads\Robo\Tasks
 	{
 		$this->taskDockerBuild('storage')->tag('bradjones/chrome-print-storage')->run();
 		$this->taskDockerBuild('xvfb')->tag('bradjones/chrome-print-xvfb')->run();
+		$this->taskDockerBuild('xvfb-pool')->tag('bradjones/chrome-print-xvfb-pool')->run();
 		$this->taskDockerBuild('php-fpm')->tag('bradjones/chrome-print-php-fpm')->run();
 		$this->taskDockerBuild('nginx')->tag('bradjones/chrome-print-nginx')->run();
 	}
@@ -362,13 +401,14 @@ class RoboFile extends Brads\Robo\Tasks
 		->run();
 		
 		// Create the remaining containers
+		$this->createXvfbPool();
 		$this->createPhpFpm();
 		$this->createNginx();
 		
 		// And start the containers
 		$this->start();
 	}
-
+	
 	/**
 	 * Converts a HTML document into a PDF document using Google Chrome.
 	 *

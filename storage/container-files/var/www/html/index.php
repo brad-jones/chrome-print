@@ -6,6 +6,7 @@ require('vendor/autoload.php');
 // Import some classes
 use Silex\Application;
 use ChromePrint\XdoTool;
+use ChromePrint\Printer;
 use Gears\String as Str;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -14,23 +15,10 @@ use Symfony\Component\HttpFoundation\Response;
 $app = new Application();
 $app['debug'] = true;
 
-// Add our XdoTool helper class into the Silex app.
-$app['xdo'] = $app->share(function ()
-{
-	return new XdoTool();
-});
-
 /**
  * Displays a nice graphical home page.
  *
- * This allows the user to monitor what google chrome is actually
- * doing by watching the screenshots as they refresh.
- *
- * > NOTE: If running inside a non-server based virtual machine (Eg: VirtualBox)
- * > or on slow hardware, you may find the screenshots do not refresh quick
- * > enough. And you don't see anything. In such as case adjust the refresh time
- * > from 500ms to a greater value. Anything faster than 500ms fails in my
- * > experience regardless of performance.
+ * Okay so it's pretty basic for now... maybe later we might jazz it up.
  */
 $app->get('/', function (Application $app)
 {
@@ -60,6 +48,17 @@ $app->get('/', function (Application $app)
 	';
 });
 
+/**
+ * Allows you to watch the printing process live.
+ *
+ * @param int $display The X display number to watch.
+ *
+ * > NOTE: If running inside a non-server based virtual machine (Eg: VirtualBox)
+ * > or on slow hardware, you may find the screenshots do not refresh quick
+ * > enough. And you don't see anything. In such as case adjust the refresh time
+ * > from 500ms to a greater value. Anything faster than 500ms fails in my
+ * > experience regardless of performance.
+ */
 $app->get('/watch/{display}', function (Application $app, $display)
 {
 	return
@@ -92,9 +91,7 @@ $app->get('/watch/{display}', function (Application $app, $display)
 /**
  * Takes a screenshot of the X virtual frame buffer.
  *
- * @param int $display If supplied this will take a screenshot from a specfic X
- *                     display. Instead of the display currently stored in the
- *                     Session.
+ * @param int $display The X display number to take a screenshot of.
  *
  * @return PNG Response
  */
@@ -102,7 +99,7 @@ $app->get('/screenshot/{display}', function (Application $app, $display)
 {
 	return new Response
 	(
-		$app['xdo']->takeScreenShot($display),
+		(new XdoTool($display))->takeScreenShot(),
 		200,
 		['Content-Type' => 'image/png']
 	);
@@ -146,40 +143,12 @@ $app->get('/print/{size}/{layout}', function (Application $app, $size, $layout)
 
 	return new Response
 	(
-		$app['xdo']->printWithUrl($url, $size, $layout), 200,
+		(new Printer())->printWithUrl($url, $size, $layout), 200,
 		['Content-Type' => 'application/pdf']
 	);
 })
 ->assert('size', 'a4|a3|letter|legal|tabloid')
 ->assert('layout', 'portrait|landscape');
-
-/**
- * Lazy mans version of the above.
- *
- * @get string url The url to print.
- *
- * > NOTE: All other settings are set at their defaults!
- *
- * @return PDF Response
- */
-$app->get('/print', function (Application $app)
-{
-	if (!$app['request']->query->has('url'))
-	{
-		throw new RuntimeException
-		(
-			'You must supply a URL for us to print!'
-		);
-	}
-
-	$url = $app['request']->query->get('url');
-
-	return new Response
-	(
-		$app['xdo']->printWithUrl($url), 200,
-		['Content-Type' => 'application/pdf']
-	);
-});
 
 // Run the app
 $app->run();

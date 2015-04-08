@@ -28,4 +28,4 @@ RUN useradd -ms /bin/bash chrome
 RUN chown -R chrome:chrome /home/chrome
 
 # Start php-fpm
-CMD chmod 0777 /var/run/docker.sock && /usr/sbin/php-fpm
+CMD ["/usr/sbin/php-fpm"]

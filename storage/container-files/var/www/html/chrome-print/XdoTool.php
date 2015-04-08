@@ -6,190 +6,29 @@ use Symfony\Component\Process\Process;
 class XdoTool
 {
 	/**
-	 * Xvfb Container Setup
-	 *
-	 * It goes without saying that 2 users would have an extremely hard time
-	 * using the keyboard and mouse at the same time. The same is true when one
-	 * sends xdotool commands simultanously to the same instance of Chrome.
-	 * In short all hell breaks loss.
-	 *
-	 * Thus we create a pool of xvfb workers much like nginx or php-fpm would.
-	 * This constructor only ensures the right number of ready and waiting
-	 * instances of Google Chrome exist.
+	 * The X display number we will be talking to.
 	 */
-	public function __construct()
+	protected $display;
+	
+	/**
+	 * XdoTool Constructor
+	 *
+	 * @param int $display All methods of this class work with a particular X
+	 *                     display. You need to supply this number.
+	 */
+	public function __construct($display = null)
 	{
-		// TODO: This logic needs to go into some sort of worker manager
-
-		// Create a new instance of chrome.
-		$this->runProcess
-		(
-			'docker run -d '.
-			'--name chrome-print-xvfb-'.$this->display.' '.
-			'--env DISPLAY='.$this->display.' '.
-			'--volumes-from chrome-print-storage '.
-			'--add-host docker:'.gethostbyname('docker').' '.
-			'bradjones/chrome-print-xvfb'
-		);
-
-		// Wait for X to start up
-		$ready = false;
-		do
-		{
-			try
-			{
-				// This will throw an exception if X is not ready yet
-				$this->takeScreenShot();
-				$ready = true;
-			}
-			catch (RuntimeException $e){}
-		}
-		while(!$ready);
-
-		// Resize the chrome window
-		$this->runProcess($this->grabChrome('windowmove --sync 0 0'));
-		$this->runProcess($this->grabChrome('windowsize --sync 100% 100%'));
-		
-		// Wait for the no sandbox banner to appear
-		$this->waitFor('no-sandbox');
-
-		// Close the sandbox notice
-		$this->setMousePos(1343, 79)->leftClick();
-
-		// Wait for it to disappear
-		$this->waitFor('no-sandbox', true);
-
-		// Open print preview
-		$this->sendKeysToChrome('ctrl+p');
-		
-		// Wait for the preview to open
-		$this->waitFor('save-as-pdf');
-
-		// Enable background graphics
-		$this->setMousePos(140, 578)->leftClick();
-
-		// Close the print preview box
-		$this->setMousePos(226, 147)->leftClick();
-
-		// Wait for print preview to close.
-		$this->waitFor('save-as-pdf', true);
+		$this->display = $display;
 	}
 	
 	/**
-	 * Prints a HTML document from the provided URL.
+	 * Getter for the X Display Number
 	 *
-	 * This is the main heart of the whole operation. Basically we just
-	 * manipulate the keyboard and mouse to operate Google Chrome just as though
-	 * we were a normal user. I can see great potential for this,
-	 * ie: phantomjs replacement... :)
-	 *
-	 * @param string $url A fully qualified url.
-	 *
-	 * @return PDF Stream.
+	 * @return int
 	 */
-	public function printWithUrl($url, $size = 'a4', $layout = 'portrait')
+	public function getXDisplayNo()
 	{
-		// TODO: Select a new display number from a list of ready displays
-
-		// TODO: Mark that display as used
-
-		// Make sure google chrome is focused
-		$this->runProcess($this->grabChrome('windowfocus'));
-		
-		// Then focus the address bar
-		$this->setMousePos(130, 40)->leftClick();
-		
-		// Delete any existing url
-		$this->sendKeys('ctrl+a')->sendKeys('Delete');
-		
-		// Type in the url and go to it
-		$this->type($url)->sendKeys('Return');
-		
-		// Wait for the page to load
-		// The page must alert a message saying "PRINT ME"
-		// when the page is ready to be printed.
-		$this->waitFor('print-me', null, false);
-
-		// Dismiss the print me alert
-		$this->setMousePos(800, 175)->leftClick();
-
-		// Wait for the alert to disappear
-		$this->waitFor('print-me', true);
-		
-		// Open print preview
-		$this->sendKeysToChrome('ctrl+p');
-		
-		// Wait for print preview screen to open
-		$this->waitFor('save-as-pdf');
-		
-		// Click the Layout drop down
-		$this->setMousePos(304, 380)->leftClick();
-		
-		// Select either Portrait or Landscape
-		switch (strtolower($layout))
-		{
-			case 'portrait': $this->setMousePos(304, 400)->leftClick(); break;
-			case 'landscape': $this->setMousePos(304, 415)->leftClick(); break;
-		}
-		
-		// Click the paper size drop down
-		$this->setMousePos(304, 438)->leftClick();
-		
-		// Select the paper size
-		switch (strtolower($size))
-		{
-			case 'a4': $this->setMousePos(304, 460)->leftClick(); break;
-			case 'a3': $this->setMousePos(304, 475)->leftClick(); break;
-			case 'letter': $this->setMousePos(304, 490)->leftClick(); break;
-			case 'legal': $this->setMousePos(304, 500)->leftClick(); break;
-			case 'tabloid': $this->setMousePos(304, 515)->leftClick(); break;
-		}
-
-		// Click on margins drop down
-		$this->setMousePos(304, 496)->leftClick();
-		
-		// Select the None option
-		// We force the margins to none so that we can use
-		// CSS to provide ultimate control of the layout.
-		$this->setMousePos(304, 533)->leftClick();
-
-		// Now click the save button
-		$this->setMousePos(290, 150)->leftClick();
-		
-		// Wait for the save file dialog box
-		$this->runProcess($this->setDisplay('xdotool search --sync "Save File"'));
-		
-		// Then focus the name box
-		$this->setMousePos(125, 25)->leftClick();
-		
-		// Delete any existing filename
-		$this->sendKeys('ctrl+a')->sendKeys('Delete');
-		
-		// Type in the temp filename
-		$this->type($this->pdfFile)->sendKeys('Return');
-		
-		// Wait for PDF file to exist
-		while (!file_exists($this->pdfFile)){ usleep(100); }
-		
-		// Wait for pdf file to be finished writing
-		// Because chrome is running in another container we can't use
-		// lsof or other similar type solutions. I think the ideal solution
-		// would be to use incond inside the xvfb container to write another
-		// dummy file the second the pdf is closed by chrome. But this seems
-		// to work for now.
-		do
-		{
-			$pdf1 = file_get_contents($this->pdfFile);
-			usleep(100);
-			$pdf2 = file_get_contents($this->pdfFile);
-		}
-		while($pdf1 != $pdf2);
-		
-		// Delete printed pdf file
-		unlink($this->pdfFile);
-
-		// Return pdf
-		return $pdf1;
+		return $this->display;
 	}
 	
 	/**
@@ -203,44 +42,28 @@ class XdoTool
 	 * element the mouse needs to be placed on top of and then just measure the
 	 * number of pixels from the top left corner to get your X and Y position.
 	 *
-	 * @param int $display If supplied this will take a screenshot from a
-	 *                     specfic X display. Instead of the display currently
-	 *                     stored in the Session.
-	 *
 	 * @return PNG Stream
 	 */
-	public function takeScreenShot($display = 'session')
+	public function takeScreenShot()
 	{
 		$process = $this->runProcess
 		(
-			$this->setDisplay
-			(
-				'import -window root -quality 100 png:-',
-				$display
-			)
+			$this->setDisplay('import -window root -quality 100 png:-')
 		);
 		
 		return $process->getOutput();
 	}
 	
-	private function setDisplay($cmd, $display = 'session')
-	{
-		if ($display == 'session')
-		{
-			return 'DISPLAY=:'.$this->display.' '.$cmd;
-		}
-		else
-		{
-			return 'DISPLAY=:'.$display.' '.$cmd;
-		}
-	}
-	
-	private function grabChrome($cmd)
-	{
-		return $this->setDisplay('xdotool search --sync "Google Chrome" '.$cmd);
-	}
-	
-	private function setMousePos($x, $y)
+	/**
+	 * Set the position of the mouse on the screen.
+	 *
+	 * > NOTE: 0,0 in the top left corner.
+	 *
+	 * @param int $x The number of pixels in the x-plain.
+	 * @param int $y The number of pixels in the y-plain.
+	 * @return self For method chaining.
+	 */
+	public function setMousePos($x, $y)
 	{
 		$this->runProcess
 		(
@@ -250,17 +73,39 @@ class XdoTool
 		return $this;
 	}
 	
-	private function leftClick()
+	/**
+	 * Sends a standard left mouse click at the mouses current position.
+	 *
+	 * @return self For method chaining.
+	 */
+	public function leftClick()
 	{
 		$this->runProcess
 		(
 			$this->setDisplay('xdotool click 1')
 		);
 		
+		// This is important, we get some race conditions
+		// if we don't slow things down a little.
+		usleep(100000);
+		
 		return $this;
 	}
 	
-	private function sendKeys($keys)
+	/**
+	 * Sends key combinations, such as Ctrl+Alt+Del
+	 *
+	 * > NOTE: If you want to type normal characters
+	 * > into a text field use the ```type()``` method.
+	 *
+	 * @param string $keys A string that represents the keys you want sent.
+	 *
+	 * @see http://cgit.freedesktop.org/xorg/proto/x11proto/plain/keysymdef.h
+	 * To press the backspace key you would supply "BackSpace". Not XK_BackSpace
+	 *
+	 * @return self For method chaining.
+	 */
+	public function sendKeys($keys)
 	{
 		$this->runProcess
 		(
@@ -270,7 +115,16 @@ class XdoTool
 		return $this;
 	}
 	
-	private function sendKeysToChrome($keys)
+	/**
+	 * Sends key combinations directly to Google Chrome.
+	 *
+	 * This works exactly the same as the ```sendKeys()``` method
+	 * but ensures the Google Chrome window is focuses first.
+	 *
+	 * @param string $keys A string that represents the keys you want sent.
+	 * @return self For method chaining.
+	 */
+	public function sendKeysToChrome($keys)
 	{
 		$this->runProcess
 		(
@@ -280,7 +134,15 @@ class XdoTool
 		return $this;
 	}
 	
-	private function type($text)
+	/**
+	 * Types text into any currently focuses input field.
+	 *
+	 * > NOTE: To focus a field use ```setMousePos()->leftClick()```
+	 *
+	 * @param string $text The text you wish to type.
+	 * @return self For method chaining.
+	 */
+	public function type($text)
 	{
 		$this->runProcess
 		(
@@ -290,25 +152,24 @@ class XdoTool
 		return $this;
 	}
 	
-	private function runProcess($cmd)
-	{
-		$process = new Process($cmd);
-		
-		$process->run();
-		
-		if (!$process->isSuccessful())
-		{
-			throw new RuntimeException($process->getErrorOutput());
-		}
-		
-		return $process;
-	}
-
-	private function waitFor($pattern, $notExist = false, $sync = true)
+	/**
+	 * Waits for a Graphical Element to Appear or Disappear on the screen.
+	 *
+	 * We are operating a GUI program with a computer program which doesn't have
+	 * any eyes and so this is the next best thing. We can't click a button if
+	 * it hasn't been drawn on the screen yet.
+	 *
+	 * @param string $pattern The name of the visgrep pattern file to use.
+	 * @param bool $notExist Set to true to wait for the element to disappear.
+	 * @param bool $sync Waits for the screen to be static before continuing.
+	 * @param int $timeout The number of seconds we will wait for.
+	 * @return self For method chaining.
+	 */
+	public function waitFor($pattern, $notExist = false, $sync = true, $timeout = 1)
 	{
 		// Find the pattern file
 		$pattern = __DIR__.'/visgrep/'.$pattern.'.pat';
-
+		
 		if (!file_exists($pattern))
 		{
 			throw new RuntimeException
@@ -316,25 +177,30 @@ class XdoTool
 				'Pattern file does not exist: '.$pattern
 			);
 		}
-
+		
 		// Build the command to run
 		$cmd = $this->setDisplay('visgrep /dev/stdin '.$pattern);
-
+		
 		// We are not ready until this loop passes true
 		$ready = false;
-
+		
+		// Sometimes visgrep just doesn't work, instead of getting hung up here
+		// for ages we will only loop for the timeout time Which defaults to 1
+		// second, in the computer world this is a very long time.
+		$start_time = time();
+		
 		do
 		{
 			// Create a new process
 			$process = new Process($cmd);
-
+			
 			// Take a new screenshot and pass it in via stdin
 			$process->setInput($this->takeScreenShot());
-
+			
 			// Run the command
 			$process->run();
-
-			// An exist code of 2 actually means something went wrong.
+			
+			// An exit code of 2 actually means something went wrong.
 			// If have also noticed visgrep doesn't always send errors
 			// to stderr, hence outputting both in the exception.
 			if ($process->getExitCode() == 2)
@@ -345,12 +211,12 @@ class XdoTool
 					$process->getErrorOutput()
 				);
 			}
-
+			
 			// Did we find the pattern?
 			// If this is empty, we couldn't find the pattern.
 			// If this contains content we did find the pattern.
 			$exists = !empty($process->getOutput());
-
+			
 			// Most of the time we need to check if an element exists on the
 			// screen. Sometimes though we want to check if an element has
 			// disappeared.
@@ -363,8 +229,8 @@ class XdoTool
 				$ready = $exists;
 			}
 		}
-		while(!$ready);
-
+		while(!$ready && (time() - $start_time) < $timeout);
+		
 		// This works in a similar way to the xdotool --sync option.
 		// Even though our pattern has been found if the screen is still
 		// changing we probably want to wait until it's finished doing whatever
@@ -373,15 +239,64 @@ class XdoTool
 		// up here.
 		if ($sync)
 		{
+			// Again we don't need to wait for 3 billion years.
+			// If the screen is still changing after a second, it's probably
+			// a cursor blinking, Chromes spinning icon spinning or some other
+			// nonsense which we don't care for.
+			$start_time = time();
+			
 			do
 			{
 				$img1 = $this->takeScreenShot();
 				usleep(100000); // 100ms
 				$img2 = $this->takeScreenShot();
 			}
-			while($img1 != $img2);
+			while($img1 != $img2 && (time() - $start_time) < $timeout);
 		}
-
+		
 		return $this;
+	}
+	
+	/**
+	 * Prefixes a cmd with the DISPLAY environment variable.
+	 *
+	 * @param string $cmd The command to run.
+	 * @return string
+	 */
+	protected function setDisplay($cmd)
+	{
+		return 'DISPLAY=:'.$this->display.' '.$cmd;
+	}
+	
+	/**
+	 * Ensures the Google Chrome window is focused before running the next cmd.
+	 *
+	 * @param string $cmd The command to run on the Google Chrome Window.
+	 * @return string.
+	 */
+	protected function grabChrome($cmd)
+	{
+		return $this->setDisplay('xdotool search --sync "Google Chrome" '.$cmd);
+	}
+	
+	/**
+	 * A helper method to run a command using Symfony's Process class.
+	 *
+	 * @param string $cmd The command to run.
+	 * @throws RuntimeException When the command exits with errors.
+	 * @return Symfony\Component\Process\Process
+	 */
+	protected function runProcess($cmd)
+	{
+		$process = new Process($cmd);
+		
+		$process->run();
+		
+		if (!$process->isSuccessful())
+		{
+			throw new RuntimeException($process->getErrorOutput());
+		}
+		
+		return $process;
 	}
 }

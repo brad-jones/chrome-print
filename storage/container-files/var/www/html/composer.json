@@ -3,6 +3,7 @@
 	{
 		"silex/silex": "~1.2",
 		"symfony/process": "2.*",
+		"symfony/finder": "2.*",
 		"gears/string": "*"
 	},
 	"autoload":
