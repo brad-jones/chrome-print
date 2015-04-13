@@ -56,7 +56,32 @@ This provides the _"glue"_ between all the docker containers.
     script will automatically create new xvfb containers and remove expired
     containers. This makes the REST requests as fast as possible.
 
-It gave me the idea of well why
+Most of the actual logic for controlling Google Chrome is contained int he php
+REST api. There is a class ```XdoTool.php``` that is basically a wrapper for
+[xdotool](http://www.semicomplete.com/projects/xdotool/) a command which sends
+keyboard and mouse events to an X server.
+
+The Reality
+--------------------------------------------------------------------------------
 The reality is that this is simply too slow and error prone.
 If anything this project taught me more about docker containers than anything.
+
+I had it running beautifully on my workstation and then tried to deploy it too
+an Amazon EC2 instance and it just refused to work. Im sure if I upgraded the
+EC2 instance with some more RAM, maybe an extra core or 2 it would have worked
+but it wasn't my instance to upgrade.
+
+The issues stem from the fact that because we are dealing with a GUI
+application timing of sending key strokes and mouse clicks is absolutely
+crtitical. If the button has not yet been drawn to the frame buffer we can't
+click it, which then just snowballs.
+
+I tried to mitigate this where possible by using
+[visgrep](http://hoopajoo.net/projects/xautomation.html)
+
+Then not mention the fact that took on the order of ~5 seconds to actually print
+a PDF, compared to less than 1 second when using phantomjs.
+
+> If [selenium](http://www.seleniumhq.org/) ever adds an option to Print pages
+> then maybe this might be worth looking at again.
 
